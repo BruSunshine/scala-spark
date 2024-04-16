@@ -1,0 +1,4 @@
+[debug] [scala-spark] Classpath dependencies List()
+[debug] [scala-spark] Dependencies from configurations List()
+[debug] Bloop wrote the configuration of project 'scala-spark' to '/home/bsoleille/gitea/scala-spark/.bloop/scala-spark.json'
+[success] Generated .bloop/scala-spark.json

@@ -1,0 +1,299 @@
+So before we get into how to use Spark,
+how to get good performance out of Spark, and how to express basic analytics jobs
+in Spark's programming model, let's first look at some of the key ideas behind Spark
+in an effort to get a bit of intuition about why Spark is causing such a shift in
+the world of data science and analytics. As we'll see in this section, Spark
+stands out in how it deals with latency, which is a fundamental concern
+when a system becomes distributed. So, earlier in the Sequence of courses and
+the Parallel Programming course, we learned about Data Parallelism
+in the single machine, multi-core, multiprocessor world. So, we thought about how to parallelize
+something in this data parallel paradigm, in the shared memory scenario. So, one machine. And we saw parallel
+collections as an example of an implementation of this paradigm. Today what we're going to do is we're
+going to extend what we've learned from the parallel programming course when
+we were focused on shared memory. We're going to extend that
+to the distributed setting. And as a real life
+implementation of this paradigm, we're going to get into Apache Spark,
+which is a framework for big data processing that sits
+in the Hadoop ecosystem. So we've started with shared memory,
+one machine. And now,
+we're shifting to many machines, and many machines working together
+to complete a data parallel job. However, when we switch into
+this distributed paradigm, suddenly there are a lot more things
+that could go wrong that were not even of concern in the shared memory case. The list is actually much longer
+than these two points here. However, these two points are really
+the most important points to keep in mind when you're
+thinking about Spark and, in general, other frameworks for
+distributed computing. In particular, Spark handles these
+two issues particularly well. So, one issue is partial failure,
+the situation where you might have one or a few machines involved
+in a large computation. For some reason, failing. Maybe an exception gets thrown, maybe
+the network between a master node and that worker node goes down. Something happens where suddenly one
+machine no longer is available or is no longer able to contribute
+its piece of the work. This is something that wasn't really
+an issue in the case of shared memory. Another issue is latency. There's this general observation
+that sometimes certain operations will have a much higher
+latency than other operations. So, in particular, network communication,
+we'll see, is very expensive. Which is something that is a reality in
+order to the any sort of distributed job. You cannot get rid of the need
+to communicate between nodes when you're doing
+a distributed computation. So, just to summarize, latency is
+a really big concern that pops up, that can really affect the speed
+at which a job is done. And partial failure can
+really affect whether or not a job can even be completed. What happens if a machine goes down and we have no way of recovering what
+that machine was working on? So, Spark handles these two
+issues particularly well. And the big take away that I hope
+you get from this lecture and some of the others in the series is that
+fundamental concerns to distribution, like latency, they cannot be masked completely,
+they cannot be forgotten about. You can't pretend that
+this does not exist. You cannot pretend that the network is
+not involved in the computations that you have to do. You always have to think about it. And, in fact, things like latency actually
+bubble up into the programming model. Perhaps it's not immediately obvious,
+but we'll see over the course of several lectures that dealing with latency
+actually gets into the code that you're writing, you're actually reasoning
+a little bit about whether or not you're going to cause
+network communication. So this is one very
+important thing to remember. When you do a distributed job,
+you're always going to have to remember that you're going to
+cause some kind of network communication. And because it's often expense, you typically want to reduce the amount
+of network communication that you cause. Okay, so let's back up some of these
+loose arguments that I'm making. I'm saying, okay, there's a spectrum,
+and sometimes in memory computations are cheaper, computations that
+involve the network are expensive, and perhaps writing things to disk and reading
+things from disk can also be expensive. And as a programmer, you should be aware
+of when you're doing some of these things. So there's a famous chart called
+Important Latency Numbers that every programmer should know. These numbers were originally compiled by
+Jeff Dean and Peter Norvig at Google, and also later extended by professor
+Joe Hellerstein and professor Erik Meier. And the idea here,
+is to actually show the relative amount of time that different
+sorts of operations cost. And okay, so what do we have here? We have a bunch of numbers, lots of zeros. Okay, I can see that this is cheaper and
+this is more expensive. So, this is half of a nanosecond, this is a million nanoseconds,
+150 million nanoseconds. We can see that there are some
+pretty big orders of magnitude differences between some
+of these operations. Okay, that's fine. Okay, so let's zoom in on
+two of these numbers here. So, this is reading one megabyte
+sequentially from memory. There's a typo in the slides. And this is reading one megabyte
+sequentially from disk. Now, if we look at the numbers here, if we
+focus on, in particular, the nanoseconds, we can see that there is around
+approximately a 100x difference between reading 1 MB sequentially from memory and
+reading 1 MB sequentially from disk. That's a pretty big difference. Likewise, if we look at the costs of
+referencing something that exists in main memory and sending a packet all the way
+from a data center in the US to a data center in Europe and
+then back to the data center in the US, there's likewise a very
+big difference here, too. So, again, if we focus on the nanoseconds,
+we can see that there's a 1 million times difference in the amount of time that it
+takes to reference something that's in memory or to do a round trip sending
+piece of data over the network and back. That means that it's 1,000,000x slower To send a packet round trip over over
+a long distance than it is to simply reference something that
+exists in main memory. That's a huge difference. Okay, so let's try to make
+a little sense of these numbers. So we can see that they're
+going from smallest to largest. And there's kind a little bit of a trend
+here where we can organize things into groups. So, the stuff that's blue refers to
+things that tend to happen in memory. They involve no disk,
+they involve no network. This as well. The things that are orange,
+they tend to involve disk. And finally, the things that
+are purple involve network. So, in this case, we're sending two kilobytes of data
+one way over a local area network. In this case, we're doing a round trip in
+the same data center in the same network. And in this case, we're doing another
+round trip over a very long distance. Things that involve network in purple. Okay, so this is perhaps getting to be a
+little bit confusing with all the arrows. But what we see is a general trend. Memory operations tend to be faster. Disk operations tend to be pretty slow,
+but not horribly slow. And any operation involving the network. Tends to be, the slowest. Okay, so we have this general feeling
+that doing things in memory is fast. Doing things on disk is kind of slow. And doing stuff that involves a lot of
+network communication is really slow. We have some numbers, we say. We can see that this versus this is
+1 million times slower than that. And this here, reading 1 MB sequentially from memory, this is 100 times. Reading 1 MB sequentially from disk is 100 times slower than
+reading it from in-memory. So we have these numbers,
+100 times slower, 1 million times slower. But, these are orders of magnitude and
+it's really difficult to wrap your mind around the cost of these things
+when it's just some orders of magnitude. So let's try to humanize these numbers. Let's try to get a better intuition
+between really the meanings Of these order of magnitude differences
+between these latency numbers. So, to do that let's multiple all of these
+numbers that we just saw by one billion. So now, suddenly, instead of
+nanoseconds we're dealing with seconds. So we can then map each
+of these latency numbers. To human activity. So, we just kind of shift this
+into our realm of understanding, our realms of times that we operate on, and then look at how expensive some of
+these things are, relative to our lives. So, let's have a look at some
+of these latency numbers match some kind of human activity. And I should note that these come from
+GitHub just posted by Joe Hellerstein. So, you can find these online on GitHub
+and search for, Humanized Latency Numbers. So, let’s look at some of these numbers. So, we can start to group
+things into categories. Things that take seconds to a minute,
+things that take hours, things that take days so on and so forth. So if we start at the top of our list we
+have our nanoseconds now map to seconds. We have L1 cache reference. If it's equivalent to have a second of
+time, that's about one human heart beat. Okay so, we have some feeling for how fast
+referencing something in our L1 cache Is. And then the L2 cache it's about
+7 seconds comparatively so kind of the equivalent of a long yawn. Locking and unlocking things in memory
+about 25 seconds which is about the amount of time it takes to make
+a push button coffee, okay. So, we keep moving down our
+list referencing main memory is equivalent to about 100 seconds which. Depending on the person,
+is how long it takes to brush your teeth. Okay?
+So, now we're starting to get into some
+of the first networking numbers. Sending two kilobytes of data one
+way over a one gigabyte network. That's about five and a half hours. Woah, that's a big difference already. So on a local area network, one way
+send is equivalent to about Five and a half hours relative to our half
+second l one cash reference. That's huge, so the difference goes
+from one heart beat to the nano time, that it takes for you to go to lunch and
+then leave your job at the end of the day. That's a pretty big difference,
+and so lets continue. A random read on the SSD 1.7 days about
+the duration of a normal weekend. This is getting crazy isn't it? So, we go back now to reading 1
+megabyte sequentially from data that’s about 2.9 days even longer
+that like a weekend plus a holiday. Round trip within the same datacenter 5.8
+days that kind of a one week vacation. Reading 1 MB sequentially from SSD,
+11.6 days, that's almost two weeks. That's an enormous difference
+compared to an L1 cache reference. Again, half a second to 11.6 days, and as programmers we have a tendency to just
+Intermix these things without really having a good appreciation of these
+order of magnitude differences. We don't really have a good feeling for
+how different these things are. So we can keep on going reading 1 MB
+sequentially from disk is 7.8 months. That's almost as long as it takes to. Have a human pregnancy start and
+a baby be born. So, the difference between
+referencing L1 cache and reading 1 megabyte sequentially
+from disk is enormous. And finally,
+this example of a long-distance, round-trip send and receive, 4.8 years. That's about the time it takes for a bachelors degree student in the US
+to complete a bachelors degree. There's an enormous difference than
+between referring L1 in cache and doing a round trip overseas. Okay, so let's try to pluck
+some of these numbers and look at them a little bit differently. We can put them, again, into these
+categories, memory, disk, and network. We can really start to appreciate
+the differences between these things. So here, you have durations in
+the order of seconds to minutes. Worse case, days. But in this case, you have the disk case, you have operations that take on
+your order of weeks or months And in the network case, you have
+operations that take a week to years. So, a round trip on the same
+local area network is 5.8 days. So this is why the locality is
+important in distributed systems. You want to have two servers next to each
+other if they have to do some sort of network communication. You don't want one Server to be
+on the other side of the planet, because the difference here
+is between days and years. In any case,
+if you have to make some request to some service that you don't where it is, maybe
+it's on the other side of the planet. This could cost, relative to an L1 cache
+reference taking half a second, 4.8 years. These differences are enormous
+once they're humanized. Okay, now that we have seen this table of
+latency numbers that every program you should know, in particular with
+the humanized version of this table. We should now have some intuition about
+how expensive network communication disk operations really are relative
+to doing things in memory. So now that we have this intuition, now
+that we have this feeling of indeed how expensive these things are, one might ask,
+well okay great but how do these numbers about Latency relate to big data
+processing or big data analytics. So to try and understand how these latency
+numbers matter in big data processing let's have a look at the big system
+that everybody used before Spark appeared on the horizon. Let's have a look at Hadoop. So you may have heard of Hadoop before. Hadoop is a widely used large
+scale batch processing framework. It's an open source implementation of
+a system that Google introduced or that Google uses in
+house called MapReduce. MapReduce was a big deal in the early
+2000s when Google began developing it and using it internally. Because it provided a really simple API. The simple map and reduce steps. So these kind of functionally
+oriented map steps. And, these functionally oriented reduce
+steps, where you kind of combined data. This was very easy for programmers to wrap their minds around,
+were large clusters of many machines. If all you had to do was think
+in terms of map and reduce and then suddenly you're controlling a lot of
+machines, but using these two operations, that's a really simple way to do these
+large scare distributed operations, but. Really, the big thing that it offered in
+addition to this API that lots of people could wrap their mind around easily,
+was fault tolerance. And fault tolerance is really
+what made it possible for Hadoop/MapReduce to scale to such
+large configurations of nodes. So that meant that you could do processing on data whose size was
+completely unbounded. Things that could never in anybody's
+wildest dreams be done in a week's worth of time on one computer, could be
+easily done on a network of hundreds or thousands of computers in
+a matter of minutes or hours. So, fault tolerance is
+what made that possible. Without fault tolerance it would be
+impossible to do jobs on hundreds or thousands of nodes. And the reason why fault tolerance is so
+important in distributed systems or in large scale data processing Is because
+these machines weren't particularly reliable or fancy, and the likelihood of
+at least one of those nodes failing or having some network issue or something
+was extremely high midway through a job. What Hadoop/MapReduce gave programmers
+was the ability to ensure that you could really actually do computations
+with unthinkably large data sets and you know that they'll succeed
+to completion somehow. Because even if a few nodes fail, the system can somehow find a way to
+recompute that data that was lost. So there two things, this simple API and
+this ability to recover from failure so you can then scale your job through the
+large clusters, this made it possible for a normal Google software engineer to craft
+complex pipelines of MapReduce stages on really, really big data sets. So basically everybody in the company
+was able to do these really large scale computations and to find all kinds of cool
+insights in these really large data sets. Okay, so that all sounds really great. Why don't we just use Hadoop? Why bother with Spark then? Well, if we jump back to the latency
+numbers that we just saw, fault-tolerance in
+Hadoop/MapReduce comes at a cost. Between each map and reduce step, in order
+to recover from potential failures, Hadoop will shuffle its data over the network and
+write intermediate data to disk. So it's doing a lot of network and
+disk operations. Remember, we just saw that reading and writing to disk is actually
+100 times slower, not 1,000. That was a typo. It's actually 100 times
+slower than in-memory. And network communication
+was up to 1,000,000 times slower than doing computations
+in-memory if you can. So that's a big difference. So remember these latency
+numbers that we just saw. If we know that Hadoop/MapReduce is
+doing a bunch of operations on disk and over the network,
+these things have to be expensive. Is there a better way? Is there some way to do
+more to this in-memory? Spark manages to keep fault tolerance,
+but it does so while taking a different strategy
+to try and reduce this latency. So in particular, what's really cool
+about Spark is that it uses ideas from functional programming to deal with
+this problem of latency to try and get rid of writing to disk a lot and
+doing a lot of network communication. What spark tries to do is it tries
+to keep all of its data, or all of the data that is needed for computational
+as much as possible in-memory. And it's always immutable,
+data is always immutable. If I can keep immutable data in-memory,
+and I use these nice, functional transformations,
+like we learned in Scala collections, like doing a map on a list and
+get another list back. If we do these sorts of things we can
+build up chains of transformations on this immutable, functional data. So we can get full tolerance
+by just keeping track of the functional transformations
+that we make on this functional data. And in order to figure out how
+to recompute a piece of data on a node that might have crashed,
+or to restart that work that was supposed to be done on that
+node somewhere else, all we have to do is remember the transformations that
+were done to this immutable data. Read that data in somewhere else or
+on the same node, and then replay those functional transformations
+over the original data set. So this is how Spark managed to
+figure out a way to achieve fault tolerance without having to regularly
+write intermediate results to disk. So everything stays in-memory, and
+only when there's a failure is a bunch of network communication or reading and
+writing operations actually done. As a result, Spark has been shown to
+be up to 100 times more performant than Hadoop for the same jobs. And at the same time, Spark has
+even gotten more expressive APIs. So you're not limited anymore to map and
+reduce operations. Now you have basically the entire API that
+was available to you on Scala collections. This is also very cool. So you have something that is very fast,
+still fault tolerant, and on the other hand, you have even more expressive APIs
+available to you than you did in Hadoop. This is great. So to go back to this image that we drew,
+we've put things into categories, memory, disk, network, right? Network is weeks and years,
+disk is weeks and months, and memory is seconds and days. What we have is this pattern,
+ultimately Hadoop sits here. So many of Hadoop's operations involve
+disk and network operations, right? So Hadoop is doing a lot of this stuff,
+whereas Spark is here. Spark is doing its best to try and shift
+many of its operations in this direction, more things being done in memory, less things being done on disk and
+over the network. As we'll see, it'll come out in
+the APIs that we're going to learn, but Spark does its best to aggressively
+minimize any network traffic that it might have to take. So we have this. We have Spark favoring in-memory
+computations and operations, aggressively minimizing network
+operations as much as it can. And Hadoop still doing a lot of
+its work involving the disk, and perhaps a little less aggressive,
+but [INAUDIBLE]. So just looking at these [INAUDIBLE] we
+[INAUDIBLE] Hadoop [INAUDIBLE] operates kind of on this side. Then we look at Spark here, we have
+more operations sitting on this side and fewer hopefully in the network box. We have this trend. It's been shown on numerous occasions that
+Spark is significantly faster than Hadoop. So Hadoop,
+it takes 100 seconds per iteration, 110 seconds to be exact, per iteration for
+this Logistic Regression application, and Spark only takes 0.9 seconds. So in this case, it's about 100 times faster than
+this equivalent program in Hadoop. That's a big deal. And just to show a few more numbers,
+related to this same application, logistic regression, what we see is
+that the first iteration that Spark does is kind of expensive. It takes 80 seconds for
+the first iteration but then the next iterations are 1 second. I hope this gives you some intuition about
+why Spark's different approach to handling latency is so important to,
+in the end, developer productivity. This enables developers to have a much
+tighter feedback loop where they can experiment with the same amount of data
+but only in few seconds to few minutes they can have a result,
+tune your algorithm and try again. Whereas if they were to use Hadoop for
+the same algorithm it would take them minutes to hours to see any
+sort of results and go back. Quantitatively, it's a lot of time
+the develops are saving by this clever approach to dealing with latency. And it's all built up and
+functional ideas, which is pretty neat. So intuitively, day-to-day these
+differences in performance, it has real impacts on on
+developer productivity. If you try to complete an equivalent
+job both in Hadoop and Spark, the same job in Hadoop you could
+start the job, go get lunch, then get some coffee with your colleagues,
+pick up your kids from school. And when you get home,
+SSH back into your work computer and see that the job just completed. Whereas Spark, you can start your job, go grab some
+coffee while your Spark job is running. And then by the time you're back at
+your computer, the job is finished. This means people are more productive. And you can get many more
+iterations done in one working day than you can solution built
+on top of Hadoop/MapReduce. So Spark delivers real productivity
+improvements to the analyst, to the developer. And these benefits haven't gone unnoticed,
+you can check Google's trends. You can compare search queries for
+Apache Spark versus Apache Hadoop, and as you can see,
+since about 2013, early 2014, Spark has really experienced a massive
+uptick in interest, so much so that it's eclipsed search queries for
+Apache Hadoop. These benefits to developer productivity
+are driving the popularity of Spark, especially relative to Hadoop. People really see a benefit
+in this framework.

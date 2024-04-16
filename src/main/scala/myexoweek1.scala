@@ -1,7 +1,1 @@
-package myexoweek1
-
-//parallelism on JVM1
-
-// lecture 1
-
-
+//package myexoweek1
